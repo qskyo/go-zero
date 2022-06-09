@@ -2,6 +2,7 @@ package gen
 
 import (
 	"database/sql"
+	_ "embed"
 	"io/ioutil"
 	"os"
 	"path"
@@ -20,7 +21,8 @@ import (
 	"github.com/zeromicro/go-zero/tools/goctl/util/pathx"
 )
 
-var source = "CREATE TABLE `test_user` (\n  `id` bigint NOT NULL AUTO_INCREMENT,\n  `mobile` varchar(255) COLLATE utf8mb4_bin NOT NULL,\n  `class` bigint NOT NULL,\n  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,\n  `create_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP,\n  `update_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `mobile_unique` (`mobile`),\n  UNIQUE KEY `class_name_unique` (`class`,`name`),\n  KEY `create_index` (`create_time`),\n  KEY `name_index` (`name`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;"
+//go:embed testdata/user.sql
+var source string
 
 func TestCacheModel(t *testing.T) {
 	logx.Disable()
@@ -145,7 +147,10 @@ func Test_genPublicModel(t *testing.T) {
 	tables, err := parser.Parse(modelFilename, "")
 	require.Equal(t, 1, len(tables))
 
-	code, err := g.genModelCustom(*tables[0])
+	code, err := g.genModelCustom(*tables[0], false)
 	assert.NoError(t, err)
-	assert.Equal(t, "package model\n\ntype TestUserModel interface {\n\ttestUserModel\n}\n", code)
+	assert.True(t, strings.Contains(code, "package model"))
+	assert.True(t, strings.Contains(code, "TestUserModel interface {\n\t\ttestUserModel\n\t}\n"))
+	assert.True(t, strings.Contains(code, "customTestUserModel struct {\n\t\t*defaultTestUserModel\n\t}\n"))
+	assert.True(t, strings.Contains(code, "func NewTestUserModel(conn sqlx.SqlConn) TestUserModel {"))
 }

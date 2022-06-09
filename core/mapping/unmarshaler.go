@@ -97,10 +97,6 @@ func (u *Unmarshaler) unmarshalWithFullName(m Valuer, v interface{}, fullName st
 	numFields := rte.NumField()
 	for i := 0; i < numFields; i++ {
 		field := rte.Field(i)
-		if usingDifferentKeys(u.key, field) {
-			continue
-		}
-
 		if err := u.processField(field, rve.Field(i), m, fullName); err != nil {
 			return err
 		}
@@ -235,7 +231,7 @@ func (u *Unmarshaler) processFieldPrimitive(field reflect.StructField, value ref
 			return u.processFieldPrimitiveWithJSONNumber(field, value, v, opts, fullName)
 		default:
 			if typeKind == valueKind {
-				if err := validateValueInOptions(opts.options(), mapValue); err != nil {
+				if err := validateValueInOptions(mapValue, opts.options()); err != nil {
 					return err
 				}
 
@@ -257,6 +253,10 @@ func (u *Unmarshaler) processFieldPrimitiveWithJSONNumber(field reflect.StructFi
 		return err
 	}
 
+	if err := validateValueInOptions(v, opts.options()); err != nil {
+		return err
+	}
+
 	if fieldKind == reflect.Ptr {
 		value = value.Elem()
 	}
@@ -273,6 +273,10 @@ func (u *Unmarshaler) processFieldPrimitiveWithJSONNumber(field reflect.StructFi
 		iValue, err := v.Int64()
 		if err != nil {
 			return err
+		}
+
+		if iValue < 0 {
+			return fmt.Errorf("unmarshal %q with bad value %q", fullName, v.String())
 		}
 
 		value.SetUint(uint64(iValue))
@@ -496,10 +500,20 @@ func (u *Unmarshaler) fillSlice(fieldType reflect.Type, value reflect.Value, map
 	return nil
 }
 
-func (u *Unmarshaler) fillSliceFromString(fieldType reflect.Type, value reflect.Value, mapValue interface{}) error {
+func (u *Unmarshaler) fillSliceFromString(fieldType reflect.Type, value reflect.Value,
+	mapValue interface{}) error {
 	var slice []interface{}
-	if err := jsonx.UnmarshalFromString(mapValue.(string), &slice); err != nil {
-		return err
+	switch v := mapValue.(type) {
+	case fmt.Stringer:
+		if err := jsonx.UnmarshalFromString(v.String(), &slice); err != nil {
+			return err
+		}
+	case string:
+		if err := jsonx.UnmarshalFromString(v, &slice); err != nil {
+			return err
+		}
+	default:
+		return errUnsupportedType
 	}
 
 	baseFieldType := Deref(fieldType.Elem())
@@ -731,10 +745,10 @@ func fillWithSameType(field reflect.StructField, value reflect.Value, mapValue i
 	if field.Type.Kind() == reflect.Ptr {
 		baseType := Deref(field.Type)
 		target := reflect.New(baseType).Elem()
-		target.Set(reflect.ValueOf(mapValue))
+		setSameKindValue(baseType, target, mapValue)
 		value.Set(target.Addr())
 	} else {
-		value.Set(reflect.ValueOf(mapValue))
+		setSameKindValue(field.Type, value, mapValue)
 	}
 
 	return nil
@@ -808,4 +822,12 @@ func readKeys(key string) []string {
 	cacheKeysLock.Unlock()
 
 	return keys
+}
+
+func setSameKindValue(targetType reflect.Type, target reflect.Value, value interface{}) {
+	if reflect.ValueOf(value).Type().AssignableTo(targetType) {
+		target.Set(reflect.ValueOf(value))
+	} else {
+		target.Set(reflect.ValueOf(value).Convert(targetType))
+	}
 }
